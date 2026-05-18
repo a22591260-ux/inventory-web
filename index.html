@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>數量進出管制系統</title>
+    <!-- 引入 Tailwind CSS 網頁快速美化排版 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-100 min-h-screen p-4 md:p-8">
+
+    <div class="max-w-5xl mx-auto space-y-6">
+        
+        <!-- 系統標題 -->
+        <header class="bg-white p-5 rounded-xl shadow-xs border border-slate-200 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-slate-800">📊 數量進出異動管制系統</h1>
+            <span id="system-status" class="text-xs bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full font-semibold">系統連線中</span>
+        </header>
+
+        <!-- 即時庫存看板 -->
+        <section class="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+            <h2 class="text-base font-bold text-slate-700 mb-4">📦 目前各機種即時庫存 (Stock Balance)</h2>
+            <div id="stock-container" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                <p class="text-slate-400 col-span-full text-center py-2">讀取庫存資料中...</p>
+            </div>
+        </section>
+
+        <!-- 資料登錄表單 -->
+        <section class="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+            <h2 class="text-base font-bold text-slate-700 mb-4">📝 進出貨異動登錄 Form</h2>
+            <form id="tx-form" class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                
+                <!-- 類型選擇 (進庫 / 出庫) -->
+                <div>
+                    <label class="block text-sm font-semibold text-slate-600 mb-2">作業類型</label>
+                    <div class="flex gap-3">
+                        <label id="label-in" class="flex-1 text-center border p-3 rounded-lg cursor-pointer bg-blue-50 border-blue-500 font-bold text-blue-700">
+                            <input type="radio" name="type" value="IN" checked class="mr-1"> 進庫 (+)
+                        </label>
+                        <label id="label-out" class="flex-1 text-center border p-3 rounded-lg cursor-pointer bg-slate-50 border-slate-200 font-bold text-slate-700">
+                            <input type="radio" name="type" value="OUT" class="mr-1"> 出庫 (-)
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 訂單編號 -->
+                <div>
+                    <label class="block text-sm font-semibold text-slate-600 mb-2">訂單 / 工單編號</label>
+                    <input type="text" id="order_id" required placeholder="請輸入單號" class="w-full border border-slate-300 rounded-lg p-3 focus:outline-blue-500">
+                </div>
+
+                <!-- 機種 -->
+                <div>
+                    <label class="block text-sm font-semibold text-slate-600 mb-2">產品機種 (Model)</label>
+                    <input type="text" id="model" required placeholder="例如: MODEL-A" class="w-full border border-slate-300 rounded-lg p-3 focus:outline-blue-500 uppercase">
+                </div>
+
+                <!-- 數量 -->
+                <div>
+                    <label class="block text-sm font-semibold text-slate-600 mb-2">異動數量</label>
+                    <input type="number" id="quantity" min="1" required placeholder="請輸入正整數" class="w-full border border-slate-300 rounded-lg p-3 focus:outline-blue-500">
+                </div>
+
+                <!-- 作業員 -->
+                <div>
+                    <label class="block text-sm font-semibold text-slate-600 mb-2">作業人員</label>
+                    <input type="text" id="operator" required placeholder="例如: OP-01" class="w-full border border-slate-300 rounded-lg p-3 focus:outline-blue-500">
+                </div>
+
+                <!-- 提交按鈕 -->
+                <div class="flex items-end">
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition shadow-xs">
+                        💾 確認送出
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <!-- 歷史紀錄 -->
+        <section class="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+            <h2 class="text-base font-bold text-slate-700 mb-4">📋 歷史異動明細 (最新 50 筆)</h2>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm text-left">
+                    <thead class="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                        <tr>
+                            <th class="px-4 py-3">時間</th>
+                            <th class="px-4 py-3">類型</th>
+                            <th class="px-4 py-3">訂單編號</th>
+                            <th class="px-4 py-3">機種</th>
+                            <th class="px-4 py-3">數量</th>
+                            <th class="px-4 py-3">作業員</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-tbody" class="divide-y divide-slate-100 text-slate-700">
+                        <!-- 資料由 JavaScript 自動動態插入 -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- 前端邏輯控制與 API 對接 -->
+    <script>
+        // 設定後端伺服器的網址 (本地測試通常是 127.0.0.1:8000)
+        // 現場多電腦連線時，請將 127.0.0.1 改為後端主機的「實體內網 IP」
+        const API_BASE_URL = 'http://127.0.0.1:8000';
+
+        // 狀態顯示更新輔助函式
+        defSetStatus(connected) {
+            const statusBadge = document.getElementById('system-status');
+            if (connected) {
+                statusBadge.className = "text-xs bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full font-semibold";
+                statusBadge.textContent = "系統連線中";
+            } else {
+                statusBadge.className = "text-xs bg-rose-100 text-rose-800 px-3 py-1 rounded-full font-semibold animate-pulse";
+                statusBadge.textContent = "斷線或未啟動後端";
+            }
+        }
+
+        // 1. 從後端 API 刷新庫存看板與歷史紀錄
+        async function loadData() {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/data`);
+                if (!res.ok) throw new Error("API 回應失敗");
+                const data = await res.json();
+                
+                defSetStatus(true);
+
+                // 更新庫存看板
+                const container = document.getElementById('stock-container');
+                container.innerHTML = '';
+                if (Object.keys(data.stock).length === 0) {
+                    container.innerHTML = `<p class="text-slate-400 col-span-full text-center py-2">目前尚無庫存，請建立第一筆進庫資料</p>`;
+                } else {
+                    for (const [model, balance] of Object.entries(data.stock)) {
+                        const isLow = balance <= 5; // 庫存防呆水位警示
+                        const div = document.createElement('div');
+                        div.className = `p-4 border rounded-xl ${isLow ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`;
+                        div.innerHTML = `
+                            <div class="text-xs text-slate-500 font-bold uppercase">${model}</div>
+                            <div class="text-2xl font-bold mt-1 ${isLow ? 'text-rose-600' : 'text-slate-800'}">${balance}</div>
+                        `;
+                        container.appendChild(div);
+                    }
+                }
+
+                // 更新歷史明細
+                const tbody = document.getElementById('history-tbody');
+                tbody.innerHTML = '';
+                data.history.forEach(item => {
+                    const tr = document.createElement('tr');
+                    const badge = item.type === 'IN' 
+                        ? '<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-bold">進庫</span>' 
+                        : '<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-xs font-bold">出庫</span>';
+                    
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 text-slate-500 font-mono">${item.timestamp}</td>
+                        <td class="px-4 py-3">${badge}</td>
+                        <td class="px-4 py-3 font-semibold">${item.order_id}</td>
+                        <td class="px-4 py-3 uppercase">${item.model}</td>
+                        <td class="px-4 py-3 font-bold ${item.type === 'IN' ? 'text-blue-600' : 'text-amber-600'}">
+                            ${item.type === 'IN' ? '+' : '-'}${item.quantity}
+                        </td>
+                        <td class="px-4 py-3 text-slate-500">${item.operator}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                console.error("無法載入資料:", err);
+                defSetStatus(false);
+            }
+        }
+
+        // 2. 表單送出事件 (資料登錄)
+        document.getElementById('tx-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const payload = {
+                type: document.querySelector('input[name="type"]:checked').value,
+                order_id: document.getElementById('order_id').value.trim(),
+                model: document.getElementById('model').value.trim().toUpperCase(),
+                quantity: parseInt(document.getElementById('quantity').value, 10),
+                operator: document.getElementById('operator').value.trim()
+            };
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/transaction`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await res.json();
+                if (res.ok) {
+                    alert(result.message);
+                    document.getElementById('quantity').value = ''; // 只清空數量，保留工號/單號方便連續登錄
+                    loadData();
+                } else {
+                    alert(`⚠️ 登錄失敗: ${result.detail}`);
+                }
+            } catch (err) {
+                alert("無法連線至後端伺服器，請檢查後端程式是否已開啟。");
+            }
+        });
+
+        // 3. UI 視覺美化：點選進出庫按鈕時動態變更外觀顏色
+        document.querySelectorAll('input[name="type"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const btnIn = document.getElementById('label-in');
+                const btnOut = document.getElementById('label-out');
+                if (e.target.value === 'IN') {
+                    btnIn.className = "flex-1 text-center border p-3 rounded-lg cursor-pointer bg-blue-50 border-blue-500 font-bold text-blue-700";
+                    btnOut.className = "flex-1 text-center border p-3 rounded-lg cursor-pointer bg-slate-50 border-slate-200 font-bold text-slate-700";
+                } else {
+                    btnIn.className = "flex-1 text-center border p-3 rounded-lg cursor-pointer bg-slate-50 border-slate-200 font-bold text-slate-700";
+                    btnOut.className = "flex-1 text-center border p-3 rounded-lg cursor-pointer bg-amber-50 border-amber-500 font-bold text-amber-700";
+                }
+            });
+        });
+
+        // 網頁開啟時立即載入資料，並設定每 5 秒自動重新同步
+        loadData();
+        setInterval(loadData, 5000);
+    </script>
+</body>
+</html>
